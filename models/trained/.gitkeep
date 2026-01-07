@@ -1,0 +1,6 @@
+# This directory contains trained model files
+
+# Models are NOT committed to Git due to size (see .gitignore)
+# Run training scripts to generate models:
+# - python train_facial_mobilenetv2.py
+# - python train_speech_from_ravdess.py

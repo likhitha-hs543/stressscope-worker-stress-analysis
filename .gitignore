@@ -1,0 +1,65 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+*.db
+*.sqlite
+*.sqlite3
+logs/
+data/raw_videos/
+data/raw_audio/
+models/trained/*.h5
+models/trained/*.pkl
+models/trained/*.pth
+*.wav
+*.mp4
+*.avi
+
+# Environment variables
+.env
+
+# Model checkpoints
+checkpoints/
+*.ckpt
+
+# Temporary files
+temp/
+tmp/

@@ -284,7 +284,7 @@
                 <h2>Live Monitoring <span class="status inactive" id="monitor-status"></span></h2>
                 
                 <div class="video-container">
-                    <video id="webcam" autoplay playsinline></video>
+                    <video id="webcam" autoplay muted playsinline></video>
                 </div>
 
                 <div class="controls">
@@ -445,7 +445,9 @@
                 console.log('Monitoring started');
             } catch (error) {
                 console.error('Error starting monitoring:', error);
-                alert('Could not access webcam. Please grant permission.');
+                // Graceful error handling - update UI rather than aggressive alert
+                document.getElementById('recommendation').innerHTML = '<strong>⚠️ Camera Access Required:</strong> Please grant camera permission in your browser to use live monitoring. Click the camera icon in the address bar.';
+                document.getElementById('start-btn').disabled = false;
             }
         }
         

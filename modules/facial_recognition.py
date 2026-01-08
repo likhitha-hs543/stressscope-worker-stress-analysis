@@ -8,7 +8,7 @@ import numpy as np
 from tensorflow import keras
 from pathlib import Path
 import logging
-from config import FACE_CONFIG
+from config import FACE_CONFIG, FACE_MODEL_PATH
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

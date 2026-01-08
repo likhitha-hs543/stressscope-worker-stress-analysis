@@ -447,26 +447,58 @@
                 
                 document.getElementById('webcam').srcObject = webcamStream;
                 
-                // Setup MediaRecorder for audio capture
+                // Setup MediaRecorder for audio capture with fallback MIME types
                 try {
-                    mediaRecorder = new MediaRecorder(webcamStream, {
-                        mimeType: 'audio/webm;codecs=opus'
-                    });
+                    // Try different MIME types in order of preference
+                    const mimeTypes = [
+                        'audio/webm;codecs=opus',
+                        'audio/webm',
+                        'audio/ogg;codecs=opus',
+                        'audio/mp4',
+                        '' // Let browser choose
+                    ];
+                    
+                    let selectedMimeType = '';
+                    for (const mimeType of mimeTypes) {
+                        if (mimeType === '' || MediaRecorder.isTypeSupported(mimeType)) {
+                            selectedMimeType = mimeType;
+                            console.log('✓ Using MediaRecorder MIME type:', mimeType || 'browser default');
+                            break;
+                        }
+                    }
+                    
+                    // Create MediaRecorder with selected MIME type
+                    const options = selectedMimeType ? { mimeType: selectedMimeType } : {};
+                    mediaRecorder = new MediaRecorder(webcamStream, options);
                     
                     // Collect audio chunks
                     mediaRecorder.ondataavailable = (event) => {
                         if (event.data.size > 0) {
                             audioChunks.push(event.data);
-                            console.log('Audio chunk captured:', event.data.size, 'bytes');
+                            console.log('✓ Audio chunk captured:', event.data.size, 'bytes');
                         }
+                    };
+                    
+                    // Handle errors
+                    mediaRecorder.onerror = (event) => {
+                        console.error('❌ MediaRecorder error:', event.error);
                     };
                     
                     // Start recording with 5-second chunks
                     mediaRecorder.start(5000);
-                    console.log('MediaRecorder started');
+                    console.log('✓ MediaRecorder started successfully with MIME type:', selectedMimeType || 'default');
                     
                 } catch (recorderError) {
-                    console.warn('MediaRecorder not supported, audio analysis disabled:', recorderError);
+                    console.error('❌ MediaRecorder initialization failed:', recorderError);
+                    console.error('   Audio analysis will be disabled. Speech stress scores will be 0.');
+                    console.error('   Try using a different browser (Chrome, Firefox, or Edge recommended).');
+                    
+                    // Show user-friendly error
+                    alert('⚠️ Audio recording is not supported in this browser.\n\n' +
+                          'Speech stress analysis will be disabled.\n' +
+                          'Only facial stress detection will work.\n\n' +
+                          'For full multimodal analysis, please use:\n' +
+                          '• Chrome, Firefox, or Edge browsers');
                 }
                 
                 // Generate session ID
@@ -553,7 +585,7 @@
                 let audioData = null;
                 if (audioChunks.length > 0) {
                     // Combine all audio chunks into a single blob
-                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                     console.log('✓ Audio blob created:', audioBlob.size, 'bytes');
                     
                     // Convert to base64
@@ -568,22 +600,29 @@
                 } else {
                     // No audio chunks available
                     missedAudioCycles++;
-                    console.warn(`⚠️  No audio chunks available (missed ${missedAudioCycles} cycles)`);
                     
-                    // HARD ERROR after threshold
-                    if (missedAudioCycles > MAX_MISSED_AUDIO_CYCLES) {
-                        console.error(`🚨 CRITICAL: Audio capture has failed for ${missedAudioCycles} consecutive cycles!`);
-                        console.error('   MediaRecorder state:', mediaRecorder ? mediaRecorder.state : 'undefined');
-                        console.error('   Audio chunks:', audioChunks.length);
+                    // Only enforce hard error if MediaRecorder was successfully initialized
+                    if (mediaRecorder && mediaRecorder.state === 'recording') {
+                        console.warn(`⚠️  No audio chunks available (missed ${missedAudioCycles} cycles)`);
                         
-                        // Show UI warning
-                        const statusBox = document.getElementById('monitor-status');
-                        statusBox.innerHTML = '⚠️ Audio Capture Failed';
-                        statusBox.style.backgroundColor = '#f59e0b';
-                        
-                        // DO NOT SEND REQUEST - audio capture is broken
-                        console.error('❌ REFUSING to send image-only request. Audio must be working.');
-                        return;
+                        // HARD ERROR after threshold
+                        if (missedAudioCycles > MAX_MISSED_AUDIO_CYCLES) {
+                            console.error(`🚨 CRITICAL: Audio capture has failed for ${missedAudioCycles} consecutive cycles!`);
+                            console.error('   MediaRecorder state:', mediaRecorder.state);
+                            console.error('   Audio chunks:', audioChunks.length);
+                            
+                            // Show UI warning
+                            const statusBox = document.getElementById('monitor-status');
+                            statusBox.innerHTML = '⚠️ Audio Capture Failed';
+                            statusBox.style.backgroundColor = '#f59e0b';
+                            
+                            // DO NOT SEND REQUEST - audio capture is broken
+                            console.error('❌ REFUSING to send image-only request. Audio must be working.');
+                            return;
+                        }
+                    } else {
+                        // MediaRecorder not available - allow facial-only mode
+                        console.log(`ℹ️  Audio unavailable (MediaRecorder not initialized). Facial-only mode.`);
                     }
                 }
                 

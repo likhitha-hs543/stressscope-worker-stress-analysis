@@ -85,20 +85,94 @@ class SpeechStressRecognizer:
         )
         return model
     
+    def apply_pre_emphasis(self, audio, coef=0.97):
+        """
+        Apply pre-emphasis filter to boost high frequencies
+        
+        Formula: y[t] = x[t] - coef * x[t-1]
+        
+        This compensates for high-frequency loss and improves feature extraction.
+        
+        Args:
+            audio: Audio array
+            coef: Pre-emphasis coefficient (default 0.97)
+            
+        Returns:
+            Pre-emphasized audio array
+        """
+        emphasized_audio = np.append(audio[0], audio[1:] - coef * audio[:-1])
+        return emphasized_audio
+    
+    def apply_loudness_normalization(self, audio, target_rms=0.1):
+        """
+        Normalize audio to target RMS loudness
+        
+        This ensures consistent loudness levels between training and live audio.
+        
+        Args:
+            audio: Audio array
+            target_rms: Target RMS energy level
+            
+        Returns:
+            Loudness-normalized audio array
+        """
+        current_rms = np.sqrt(np.mean(audio**2))
+        
+        if current_rms > 0:
+            scaling_factor = target_rms / current_rms
+            normalized_audio = audio * scaling_factor
+            logger.debug(f"Loudness normalization: RMS {current_rms:.6f} → {target_rms:.6f} (factor={scaling_factor:.4f})")
+        else:
+            normalized_audio = audio
+            logger.debug("Loudness normalization: skipped (silent audio)")
+        
+        return normalized_audio
+    
+    def enforce_fixed_duration(self, audio, duration_seconds=3.0):
+        """
+        Enforce fixed duration window by padding or clipping
+        
+        This ensures consistent input length for feature extraction.
+        
+        Args:
+            audio: Audio array
+            duration_seconds: Target duration in seconds
+            
+        Returns:
+            Fixed-duration audio array
+        """
+        target_length = int(self.sample_rate * duration_seconds)
+        current_length = len(audio)
+        
+        if current_length < target_length:
+            # Pad with zeros
+            padding = target_length - current_length
+            audio_fixed = np.pad(audio, (0, padding), mode='constant')
+            logger.debug(f"Audio padded: {current_length} → {target_length} samples ({duration_seconds}s)")
+        elif current_length > target_length:
+            # Clip to target length
+            audio_fixed = audio[:target_length]
+            logger.debug(f"Audio clipped: {current_length} → {target_length} samples ({duration_seconds}s)")
+        else:
+            audio_fixed = audio
+            logger.debug(f"Audio duration matches target: {target_length} samples ({duration_seconds}s)")
+        
+        return audio_fixed
+    
     def preprocess_audio(self, audio_data, sr=None):
         """
         Step 1: Audio preprocessing - clean before you think
         
-        Raw audio is chaos. This creates structure.
-        
-        Operations:
-        - Resample to target sample rate
-        - Remove silence
-        - Normalize amplitude
+        Enhanced preprocessing to match training-time conditions:
+        1. Resample to target sample rate
+        2. Apply pre-emphasis filter (boost high frequencies)
+        3. Trim silence aggressively (top_db=20)
+        4. Apply loudness normalization (RMS-based)
+        5. Enforce fixed duration window
         
         Why this matters:
-        - Reduces noise
-        - Makes ML stable
+        - Reduces distribution shift between training and live audio
+        - Makes ML predictions more stable
         - Enables consistent feature extraction
         
         Args:
@@ -111,35 +185,42 @@ class SpeechStressRecognizer:
         if sr is None:
             sr = self.sample_rate
         
-        # Resample if needed
+        logger.debug(f"Preprocessing audio: input length={len(audio_data)}, sr={sr}")
+        
+        # Step 1: Resample if needed
         if sr != self.sample_rate:
             audio_data = librosa.resample(
                 audio_data, 
                 orig_sr=sr, 
                 target_sr=self.sample_rate
             )
+            logger.debug(f"Resampled to {self.sample_rate}Hz: {len(audio_data)} samples")
         
-        # Remove leading/trailing silence
+        # Step 2: Apply pre-emphasis filter (boost high frequencies)
+        audio_emphasized = self.apply_pre_emphasis(audio_data, coef=0.97)
+        logger.debug(f"Pre-emphasis applied: mean={np.mean(audio_emphasized):.6f}, std={np.std(audio_emphasized):.6f}")
+        
+        # Step 3: Remove leading/trailing silence aggressively
         audio_trimmed, _ = librosa.effects.trim(
-            audio_data, 
-            top_db=20
+            audio_emphasized, 
+            top_db=20  # More aggressive silence removal
         )
+        logger.debug(f"Silence trimmed: {len(audio_emphasized)} → {len(audio_trimmed)} samples")
         
-        # Normalize amplitude
+        # Step 4: Apply loudness normalization (RMS-based)
         if len(audio_trimmed) > 0:
-            audio_normalized = librosa.util.normalize(audio_trimmed)
+            audio_normalized = self.apply_loudness_normalization(audio_trimmed, target_rms=0.1)
         else:
-            audio_normalized = audio_data
+            audio_normalized = audio_emphasized
+            logger.warning("No audio after trimming, using original")
         
-        # Ensure minimum length
-        min_length = int(self.sample_rate * 1.0)  # 1 second minimum
-        if len(audio_normalized) < min_length:
-            audio_normalized = np.pad(
-                audio_normalized, 
-                (0, min_length - len(audio_normalized))
-            )
+        # Step 5: Enforce fixed duration window (3 seconds for consistency)
+        audio_fixed = self.enforce_fixed_duration(audio_normalized, duration_seconds=3.0)
         
-        return audio_normalized
+        # Log final statistics
+        logger.info(f"Audio preprocessing complete: length={len(audio_fixed)}, mean={np.mean(audio_fixed):.6f}, std={np.std(audio_fixed):.6f}, rms={np.sqrt(np.mean(audio_fixed**2)):.6f}")
+        
+        return audio_fixed
     
     def extract_mfcc_features(self, audio):
         """
@@ -331,16 +412,36 @@ class SpeechStressRecognizer:
         feature_dict = {
             'mfcc_mean': float(np.mean(mfcc_features[:self.n_mfcc])),
             'mfcc_std': float(np.mean(mfcc_features[self.n_mfcc:2*self.n_mfcc])),
+            'mfcc_min': float(np.mean(mfcc_features[2*self.n_mfcc:3*self.n_mfcc])),
+            'mfcc_max': float(np.mean(mfcc_features[3*self.n_mfcc:4*self.n_mfcc])),
             'pitch_mean': float(pitch_features[0]),
             'pitch_std': float(pitch_features[1]),
+            'pitch_min': float(pitch_features[2]),
+            'pitch_max': float(pitch_features[3]),
             'pitch_range': float(pitch_features[4]),
             'rms_energy': float(energy_features[0]),
             'rms_std': float(energy_features[1]),
+            'rms_max': float(energy_features[2]),
             'zcr_mean': float(energy_features[3]),
+            'zcr_std': float(energy_features[4]),
             'tempo': float(speech_rate_features[0]),
             'onset_mean': float(speech_rate_features[1]),
-            'feature_count': len(all_features)
+            'onset_std': float(speech_rate_features[2]),
+            'feature_count': len(all_features),
+            'feature_vector_mean': float(np.mean(all_features)),
+            'feature_vector_std': float(np.std(all_features)),
+            'feature_vector_min': float(np.min(all_features)),
+            'feature_vector_max': float(np.max(all_features))
         }
+        
+        # Log detailed feature statistics for comparison with training data
+        logger.debug("📊 Detailed feature statistics:")
+        logger.debug(f"   MFCC: mean={feature_dict['mfcc_mean']:.4f}, std={feature_dict['mfcc_std']:.4f}, min={feature_dict['mfcc_min']:.4f}, max={feature_dict['mfcc_max']:.4f}")
+        logger.debug(f"   Pitch: mean={feature_dict['pitch_mean']:.1f}Hz, std={feature_dict['pitch_std']:.1f}, range={feature_dict['pitch_range']:.1f}Hz")
+        logger.debug(f"   Energy: RMS mean={feature_dict['rms_energy']:.4f}, std={feature_dict['rms_std']:.4f}, max={feature_dict['rms_max']:.4f}")
+        logger.debug(f"   ZCR: mean={feature_dict['zcr_mean']:.4f}, std={feature_dict['zcr_std']:.4f}")
+        logger.debug(f"   Speech rate: tempo={feature_dict['tempo']:.1f}BPM, onset mean={feature_dict['onset_mean']:.4f}")
+        logger.debug(f"   Overall feature vector: mean={feature_dict['feature_vector_mean']:.4f}, std={feature_dict['feature_vector_std']:.4f}, min={feature_dict['feature_vector_min']:.4f}, max={feature_dict['feature_vector_max']:.4f}")
         
         return all_features, feature_dict
     

@@ -46,7 +46,8 @@ logger = logging.getLogger(__name__)
 
 # Initialize AI modules (global instances)
 facial_recognizer = FacialEmotionRecognizer()
-speech_recognizer = SpeechStressRecognizer()
+# Initialize speech recognizer with model if it exists
+speech_recognizer = SpeechStressRecognizer(model_path=SPEECH_MODEL_PATH if SPEECH_MODEL_PATH.exists() else None)
 fusion_engine = MultimodalFusionEngine()
 rules_engine = StressRulesEngine()
 
@@ -111,6 +112,7 @@ def decode_audio_from_base64(base64_str):
         
         # Decode base64
         audio_bytes = base64.b64decode(base64_str)
+        logger.info(f"Decoded audio bytes: {len(audio_bytes)} bytes")
         
         # Try to load audio using librosa (handles WebM/Opus and other formats)
         try:
@@ -121,23 +123,31 @@ def decode_audio_from_base64(base64_str):
             # librosa returns normalized float32 audio and sample rate
             audio_data, sample_rate = librosa.load(audio_io, sr=16000, mono=True)
             
-            logger.info(f"Successfully decoded audio: shape={audio_data.shape}, sr={sample_rate}")
+            logger.info(f"✓ Successfully decoded audio: shape={audio_data.shape}, sr={sample_rate}Hz, duration={len(audio_data)/sample_rate:.2f}s")
+            
+            # Log audio statistics for debugging
+            rms_energy = np.sqrt(np.mean(audio_data**2))
+            logger.info(f"   Audio RMS energy: {rms_energy:.6f}, max: {np.max(np.abs(audio_data)):.4f}")
+            
             return audio_data
             
         except Exception as librosa_error:
             # Fallback: Try as raw PCM float32
-            logger.warning(f"Librosa decode failed, trying raw PCM: {librosa_error}")
+            logger.warning(f"⚠️  Librosa decode failed, trying raw PCM: {librosa_error}")
             audio_data = np.frombuffer(audio_bytes, dtype=np.float32)
             
             # Ensure audio is not empty
             if len(audio_data) == 0:
-                logger.error("Empty audio data after decoding")
+                logger.error("❌ Empty audio data after decoding")
                 return None
-                
+            
+            logger.info(f"Decoded as raw PCM: {len(audio_data)} samples")
             return audio_data
             
     except Exception as e:
-        logger.error(f"Error decoding audio: {e}")
+        logger.error(f"❌ Error decoding audio: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return None
 
 
@@ -356,7 +366,11 @@ def analyze_multimodal():
             **fusion_result,
             'recommendation': recommendation,
             'alert': alert_result,
-            'session_id': session_id
+            'session_id': session_id,
+            # Add speech diagnostic fields from speech_result
+            'speech_available': speech_result.get('speech_available', False),
+            'speech_model_used': speech_result.get('speech_model_used', False),
+            'speech_features_summary': speech_result.get('features_summary', {})
         }
         
         # Store in database (if employee ID provided)

@@ -45,14 +45,20 @@ class SpeechStressRecognizer:
         self.n_mels = SPEECH_CONFIG['n_mels']
         self.stress_levels = SPEECH_CONFIG['stress_levels']
         
+        # Track whether a trained model is loaded
+        self.model_loaded = False
+        
         # Load or create model and scaler
         if model_path and Path(model_path).exists():
             self._load_model(model_path)
-            logger.info(f"Loaded pre-trained model from {model_path}")
+            self.model_loaded = True
+            logger.info(f"✓ Loaded pre-trained speech model from {model_path}")
         else:
             self.model = self._build_model()
             self.scaler = StandardScaler()
-            logger.info("Created new model and scaler")
+            self.model_loaded = False
+            logger.warning(f"⚠️  Speech model not found at {model_path}. Running in FALLBACK mode (always returns 0.0)")
+            logger.warning("   To enable speech stress detection, train the model: python train_speech_from_ravdess.py")
     
     def _build_model(self):
         """
@@ -301,7 +307,7 @@ class SpeechStressRecognizer:
             audio: Preprocessed audio array
             
         Returns:
-            Complete feature vector
+            Tuple of (feature vector, feature_dict for logging)
         """
         # Extract all feature groups
         mfcc_features = self.extract_mfcc_features(audio)
@@ -317,7 +323,44 @@ class SpeechStressRecognizer:
             speech_rate_features
         ])
         
-        return all_features
+        # Create feature dictionary for logging/diagnostics
+        feature_dict = {
+            'mfcc_mean': float(np.mean(mfcc_features[:self.n_mfcc])),
+            'mfcc_std': float(np.mean(mfcc_features[self.n_mfcc:2*self.n_mfcc])),
+            'pitch_mean': float(pitch_features[0]),
+            'pitch_std': float(pitch_features[1]),
+            'pitch_range': float(pitch_features[4]),
+            'rms_energy': float(energy_features[0]),
+            'rms_std': float(energy_features[1]),
+            'zcr_mean': float(energy_features[3]),
+            'tempo': float(speech_rate_features[0]),
+            'onset_mean': float(speech_rate_features[1]),
+            'feature_count': len(all_features)
+        }
+        
+        return all_features, feature_dict
+    
+    def is_audio_silent(self, audio, energy_threshold=0.01):
+        """
+        Detect if audio is silence or too quiet
+        
+        Args:
+            audio: Audio array
+            energy_threshold: Minimum RMS energy threshold
+            
+        Returns:
+            Boolean indicating if audio is silent
+        """
+        rms = librosa.feature.rms(y=audio)[0]
+        rms_mean = np.mean(rms)
+        
+        # Check if RMS energy is below threshold
+        is_silent = rms_mean < energy_threshold
+        
+        if is_silent:
+            logger.debug(f"Audio detected as silent: RMS={rms_mean:.6f} < threshold={energy_threshold}")
+        
+        return is_silent
     
     def predict_stress_level(self, features):
         """
@@ -393,15 +436,56 @@ class SpeechStressRecognizer:
                 'stress_level': str,
                 'speech_stress_score': float,
                 'probabilities': dict,
-                'features': dict
+                'features_summary': dict,
+                'speech_available': bool,
+                'speech_model_used': bool
             }
         """
         try:
             # Preprocess audio
             audio_preprocessed = self.preprocess_audio(audio_data, sr)
             
+            logger.info(f"Audio preprocessed: {len(audio_preprocessed)} samples, duration={len(audio_preprocessed)/self.sample_rate:.2f}s")
+            
+            # Check if audio is silent
+            is_silent = self.is_audio_silent(audio_preprocessed)
+            
+            if is_silent:
+                logger.warning("⚠️  Audio is silent or too quiet - no speech detected")
+                return {
+                    'stress_level': 'Unknown',
+                    'speech_stress_score': 0.0,
+                    'probabilities': {},
+                    'features_summary': {'rms_energy': 0.0},
+                    'speech_available': False,
+                    'speech_model_used': False,
+                    'note': 'Audio is silent or too quiet'
+                }
+            
             # Extract features
-            features = self.extract_all_features(audio_preprocessed)
+            features, feature_dict = self.extract_all_features(audio_preprocessed)
+            
+            # Log feature values for debugging
+            logger.info(f"📊 Speech features extracted:")
+            logger.info(f"   RMS Energy: {feature_dict['rms_energy']:.4f}")
+            logger.info(f"   Pitch: mean={feature_dict['pitch_mean']:.1f}Hz, std={feature_dict['pitch_std']:.1f}, range={feature_dict['pitch_range']:.1f}")
+            logger.info(f"   MFCC: mean={feature_dict['mfcc_mean']:.4f}, std={feature_dict['mfcc_std']:.4f}")
+            logger.info(f"   Tempo: {feature_dict['tempo']:.1f} BPM")
+            logger.info(f"   Total features: {feature_dict['feature_count']}")
+            
+            # Check if model is trained
+            if not self.model_loaded:
+                logger.warning("⚠️  Speech model not trained - returning fallback score of 0.0")
+                logger.warning("   Train the model with: python train_speech_from_ravdess.py")
+                return {
+                    'stress_level': 'Unknown',
+                    'speech_stress_score': 0.0,
+                    'probabilities': {},
+                    'features_summary': feature_dict,
+                    'speech_available': True,
+                    'speech_model_used': False,
+                    'note': 'Model not trained - run train_speech_from_ravdess.py'
+                }
             
             # Predict stress
             stress_result = self.predict_stress_level(features)
@@ -409,25 +493,32 @@ class SpeechStressRecognizer:
             # Calculate score
             stress_score = self.calculate_speech_stress_score(stress_result)
             
+            logger.info(f"✓ Speech stress prediction: level={stress_result['stress_level']}, score={stress_score:.1f}")
+            logger.info(f"   Probabilities: {stress_result['probabilities']}")
+            
             result = {
                 'stress_level': stress_result['stress_level'],
                 'speech_stress_score': stress_score,
                 'probabilities': stress_result['probabilities'],
-                'features': {
-                    'feature_count': len(features),
-                    'audio_duration': len(audio_preprocessed) / self.sample_rate
-                }
+                'features_summary': feature_dict,
+                'speech_available': True,
+                'speech_model_used': True,
+                'audio_duration': len(audio_preprocessed) / self.sample_rate
             }
             
             return result
             
         except Exception as e:
-            logger.error(f"Error analyzing audio: {e}")
+            logger.error(f"❌ Error analyzing audio: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return {
                 'stress_level': 'Unknown',
                 'speech_stress_score': 0.0,
                 'probabilities': {},
-                'features': {},
+                'features_summary': {},
+                'speech_available': False,
+                'speech_model_used': False,
                 'error': str(e)
             }
     

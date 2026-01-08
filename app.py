@@ -93,14 +93,18 @@ def decode_image_from_base64(base64_str):
 def decode_audio_from_base64(base64_str):
     """
     Decode base64 audio to numpy array
+    Handles WebM/Opus format from browser MediaRecorder
     
     Args:
         base64_str: Base64 encoded audio string
         
     Returns:
-        Audio data as numpy array
+        Audio data as numpy array (mono, 16kHz sample rate)
     """
     try:
+        import librosa
+        import soundfile as sf
+        
         # Remove data URL prefix if present
         if ',' in base64_str:
             base64_str = base64_str.split(',')[1]
@@ -108,10 +112,30 @@ def decode_audio_from_base64(base64_str):
         # Decode base64
         audio_bytes = base64.b64decode(base64_str)
         
-        # Convert to numpy array (assuming float32 PCM)
-        audio_data = np.frombuffer(audio_bytes, dtype=np.float32)
-        
-        return audio_data
+        # Try to load audio using librosa (handles WebM/Opus and other formats)
+        try:
+            # Create a temporary file-like object
+            audio_io = io.BytesIO(audio_bytes)
+            
+            # Load audio with librosa (automatically handles format conversion)
+            # librosa returns normalized float32 audio and sample rate
+            audio_data, sample_rate = librosa.load(audio_io, sr=16000, mono=True)
+            
+            logger.info(f"Successfully decoded audio: shape={audio_data.shape}, sr={sample_rate}")
+            return audio_data
+            
+        except Exception as librosa_error:
+            # Fallback: Try as raw PCM float32
+            logger.warning(f"Librosa decode failed, trying raw PCM: {librosa_error}")
+            audio_data = np.frombuffer(audio_bytes, dtype=np.float32)
+            
+            # Ensure audio is not empty
+            if len(audio_data) == 0:
+                logger.error("Empty audio data after decoding")
+                return None
+                
+            return audio_data
+            
     except Exception as e:
         logger.error(f"Error decoding audio: {e}")
         return None

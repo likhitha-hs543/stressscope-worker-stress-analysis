@@ -140,49 +140,37 @@ class FacialEmotionRecognizer:
     
     def preprocess_face(self, frame, face_coords):
         """
-        Step 2: Preprocessing - make data digestible
-        
-        This standardizes the face so the model isn't confused by:
-        - Lighting bias
-        - Camera differences
-        - Distance variations
-        
-        Think of it as putting every face under the same lab lighting.
-        
-        Args:
-            frame: Original BGR frame
-            face_coords: Tuple (x, y, w, h)
-            
-        Returns:
-            Preprocessed face array ready for model
+        Preprocess face image for inference.
+        Supports:
+        - v1 FER model (48x48 grayscale)
+        - v2 MobileNetV2 model (224x224 RGB)
         """
         x, y, w, h = face_coords
         
         # Crop face region
-        face = frame[y:y+h, x:x+w]
+        face_img = frame[y:y+h, x:x+w]
         
-        # v2 model (MobileNetV2) expects RGB, v1 expects grayscale
-        if self.input_shape[2] == 3:  # RGB for v2
-            # Convert BGR to RGB
-            face_rgb = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
-            # Resize to model input size  
-            face_resized = cv2.resize(face_rgb, (self.input_shape[0], self.input_shape[1]))
-        else:  # Grayscale for v1
-            # Convert to grayscale
-            face_gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
-            # Resize to model input size
-            face_resized = cv2.resize(face_gray, (self.input_shape[0], self.input_shape[1]))
+        # Read model input shape dynamically
+        input_shape = self.model.input_shape  # (None, H, W, C)
+        target_h, target_w, channels = input_shape[1:]
         
-        # Normalize pixel values [0, 255] → [0, 1]
-        face_normalized = face_resized / 255.0
+        # Resize FIRST (critical)
+        face_img = cv2.resize(face_img, (target_w, target_h))
         
-        # Reshape for model input (add batch dimension)
-        if len(face_normalized.shape) == 2:  # Grayscale needs channel dim
-            face_preprocessed = face_normalized.reshape(1, *self.input_shape)
-        else:  # RGB already has channels
-            face_preprocessed = np.expand_dims(face_normalized, axis=0)
+        if channels == 3:
+            # MobileNetV2 expects RGB
+            face_img = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
+            face_img = face_img.astype("float32") / 255.0
+        else:
+            # Old FER grayscale model
+            face_img = cv2.cvtColor(face_img, cv2.COLOR_BGR2GRAY)
+            face_img = face_img.astype("float32") / 255.0
+            face_img = np.expand_dims(face_img, axis=-1)
         
-        return face_preprocessed
+        # Add batch dimension
+        face_img = np.expand_dims(face_img, axis=0)
+        
+        return face_img
     
     def predict_emotion(self, preprocessed_face):
         """

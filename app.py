@@ -370,7 +370,13 @@ def analyze_multimodal():
             # Add speech diagnostic fields from speech_result
             'speech_available': speech_result.get('speech_available', False),
             'speech_model_used': speech_result.get('speech_model_used', False),
-            'speech_features_summary': speech_result.get('features_summary', {})
+            'speech_energy': speech_result.get('speech_energy', 0.0),
+            'speech_features_valid': speech_result.get('speech_features_valid', False),
+            'speech_features_summary': speech_result.get('features_summary', {}),
+            'consecutive_low_predictions': speech_result.get('consecutive_low_predictions', 0),
+            'scaled_features_min': speech_result.get('scaled_features_min', 0),
+            'scaled_features_max': speech_result.get('scaled_features_max', 0),
+            'scaled_features_mean': speech_result.get('scaled_features_mean', 0)
         }
         
         # Store in database (if employee ID provided)

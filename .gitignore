@@ -46,9 +46,7 @@ Thumbs.db
 logs/
 data/raw_videos/
 data/raw_audio/
-models/trained/*.h5
-models/trained/*.pkl
-models/trained/*.pth
+# Note: Model files in models/trained/ are tracked by Git LFS (see .gitattributes)
 *.wav
 *.mp4
 *.avi

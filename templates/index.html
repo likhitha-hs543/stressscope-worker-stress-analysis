@@ -449,44 +449,57 @@
                 
                 // Setup MediaRecorder for audio capture with fallback MIME types
                 try {
-                    // Try different MIME types in order of preference
-                    const mimeTypes = [
-                        'audio/webm;codecs=opus',
-                        'audio/webm',
-                        'audio/ogg;codecs=opus',
-                        'audio/mp4',
-                        '' // Let browser choose
-                    ];
+                    // Extract only audio tracks from the stream
+                    const audioTracks = webcamStream.getAudioTracks();
                     
-                    let selectedMimeType = '';
-                    for (const mimeType of mimeTypes) {
-                        if (mimeType === '' || MediaRecorder.isTypeSupported(mimeType)) {
-                            selectedMimeType = mimeType;
-                            console.log('✓ Using MediaRecorder MIME type:', mimeType || 'browser default');
-                            break;
+                    if (audioTracks.length === 0) {
+                        console.warn('⚠️  No audio tracks available. Audio analysis disabled.');
+                        console.warn('   Make sure microphone permission was granted.');
+                    } else {
+                        console.log('✓ Audio tracks found:', audioTracks.length);
+                        
+                        // Create an audio-only MediaStream
+                        const audioStream = new MediaStream(audioTracks);
+                        
+                        // Try different MIME types in order of preference
+                        const mimeTypes = [
+                            'audio/webm;codecs=opus',
+                            'audio/webm',
+                            'audio/ogg;codecs=opus',
+                            'audio/mp4',
+                            '' // Let browser choose
+                        ];
+                        
+                        let selectedMimeType = '';
+                        for (const mimeType of mimeTypes) {
+                            if (mimeType === '' || MediaRecorder.isTypeSupported(mimeType)) {
+                                selectedMimeType = mimeType;
+                                console.log('✓ Using MediaRecorder MIME type:', mimeType || 'browser default');
+                                break;
+                            }
                         }
+                        
+                        // Create MediaRecorder with audio-only stream
+                        const options = selectedMimeType ? { mimeType: selectedMimeType } : {};
+                        mediaRecorder = new MediaRecorder(audioStream, options);
+                        
+                        // Collect audio chunks
+                        mediaRecorder.ondataavailable = (event) => {
+                            if (event.data.size > 0) {
+                                audioChunks.push(event.data);
+                                console.log('✓ Audio chunk captured:', event.data.size, 'bytes');
+                            }
+                        };
+                        
+                        // Handle errors
+                        mediaRecorder.onerror = (event) => {
+                            console.error('❌ MediaRecorder error:', event.error);
+                        };
+                        
+                        // Start recording with 5-second chunks
+                        mediaRecorder.start(5000);
+                        console.log('✓ MediaRecorder started successfully with MIME type:', selectedMimeType || 'default');
                     }
-                    
-                    // Create MediaRecorder with selected MIME type
-                    const options = selectedMimeType ? { mimeType: selectedMimeType } : {};
-                    mediaRecorder = new MediaRecorder(webcamStream, options);
-                    
-                    // Collect audio chunks
-                    mediaRecorder.ondataavailable = (event) => {
-                        if (event.data.size > 0) {
-                            audioChunks.push(event.data);
-                            console.log('✓ Audio chunk captured:', event.data.size, 'bytes');
-                        }
-                    };
-                    
-                    // Handle errors
-                    mediaRecorder.onerror = (event) => {
-                        console.error('❌ MediaRecorder error:', event.error);
-                    };
-                    
-                    // Start recording with 5-second chunks
-                    mediaRecorder.start(5000);
-                    console.log('✓ MediaRecorder started successfully with MIME type:', selectedMimeType || 'default');
                     
                 } catch (recorderError) {
                     console.error('❌ MediaRecorder initialization failed:', recorderError);
@@ -658,20 +671,7 @@
                 const result = await response.json();
                 console.log('API response:', result);
                 
-                // Check for degraded multimodal state
-                if (result.system_state === 'DEGRADED') {
-                    console.error('🚨 SYSTEM DEGRADED: Both modalities are invalid!');
-                    const statusBox = document.getElementById('monitor-status');
-                    statusBox.innerHTML = '⚠️ DEGRADED: No valid data';
-                    statusBox.style.backgroundColor = '#ef4444';
-                    
-                    // Show on dashboard
-                    document.getElementById('current-score').textContent = '—';
-                    document.getElementById('stress-category').textContent = 'DEGRADED';
-                    return;
-                }
-                
-                // Check face detection status
+                // Check for face detection status
                 if (result.face_detected === false) {
                     noFaceFrameCount++;
                     console.warn(`⚠️  No face detected (frame ${noFaceFrameCount}/${MAX_NO_FACE_FRAMES})`);

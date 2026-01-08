@@ -161,17 +161,26 @@ class FacialEmotionRecognizer:
         # Crop face region
         face = frame[y:y+h, x:x+w]
         
-        # Convert to grayscale
-        face_gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
-        
-        # Resize to model input size
-        face_resized = cv2.resize(face_gray, (self.input_shape[0], self.input_shape[1]))
+        # v2 model (MobileNetV2) expects RGB, v1 expects grayscale
+        if self.input_shape[2] == 3:  # RGB for v2
+            # Convert BGR to RGB
+            face_rgb = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
+            # Resize to model input size  
+            face_resized = cv2.resize(face_rgb, (self.input_shape[0], self.input_shape[1]))
+        else:  # Grayscale for v1
+            # Convert to grayscale
+            face_gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
+            # Resize to model input size
+            face_resized = cv2.resize(face_gray, (self.input_shape[0], self.input_shape[1]))
         
         # Normalize pixel values [0, 255] → [0, 1]
         face_normalized = face_resized / 255.0
         
-        # Reshape for model input (add batch and channel dimensions)
-        face_preprocessed = face_normalized.reshape(1, *self.input_shape)
+        # Reshape for model input (add batch dimension)
+        if len(face_normalized.shape) == 2:  # Grayscale needs channel dim
+            face_preprocessed = face_normalized.reshape(1, *self.input_shape)
+        else:  # RGB already has channels
+            face_preprocessed = np.expand_dims(face_normalized, axis=0)
         
         return face_preprocessed
     

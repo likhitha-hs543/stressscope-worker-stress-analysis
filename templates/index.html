@@ -564,7 +564,15 @@
                     body: JSON.stringify(requestBody)
                 });
                 
+                if (!response.ok) {
+                    console.error('API request failed:', response.status, response.statusText);
+                    const errorText = await response.text();
+                    console.error('Error response:', errorText);
+                    return;
+                }
+                
                 const result = await response.json();
+                console.log('API response:', result);
                 updateEmployeeDashboard(result);
                 
             } catch (error) {
@@ -574,12 +582,20 @@
         
         // Update employee dashboard
         function updateEmployeeDashboard(data) {
+            // Log the received data for debugging
+            console.log('Dashboard update received:', data);
+            
+            // Check if we have an error
+            if (data.error) {
+                console.error('API Error:', data.error);
+                return;
+            }
+            
             // Check if we have valid data (multimodal response structure)
-            // For multimodal, we may not have face_detected, but we should have smoothed_score
             const hasData = data.smoothed_score !== undefined || data.fused_score !== undefined;
             
-            if (!hasData && !data.has_facial && !data.has_speech) {
-                console.log('No valid data detected');
+            if (!hasData) {
+                console.log('No valid score data in response');
                 return;
             }
             
@@ -587,6 +603,8 @@
             const score = data.smoothed_score !== undefined ? data.smoothed_score : 
                           (data.fused_score !== undefined ? data.fused_score : 
                           (data.facial_stress_score || 0));
+            
+            console.log(`Updating dashboard with score: ${score.toFixed(1)}`);
             
             // Use stress_category from response if available
             const category = data.stress_category || 

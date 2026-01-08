@@ -404,9 +404,14 @@
         let employeeChart = null;
         let distributionChart = null;
         let trendChart = null;
+        let lastAudioTimestamp = null;
+        let missedAudioCycles = 0;
+        let noFaceFrameCount = 0;
         
         const API_URL = 'http://localhost:5000/api/v1';
         const EMPLOYEE_ID = 'emp_' + Math.random().toString(36).substr(2, 9);
+        const MAX_MISSED_AUDIO_CYCLES = 2;
+        const MAX_NO_FACE_FRAMES = 10;
         
         // Helper function to convert blob to base64
         function blobToBase64(blob) {
@@ -503,11 +508,19 @@
             // Clear audio chunks
             audioChunks = [];
             
+            // Reset tracking counters
+            missedAudioCycles = 0;
+            noFaceFrameCount = 0;
+            lastAudioTimestamp = null;
+            
             isMonitoring = false;
             document.getElementById('start-btn').disabled = false;
             document.getElementById('stop-btn').disabled = true;
-            document.getElementById('monitor-status').classList.remove('active');
-            document.getElementById('monitor-status').classList.add('inactive');
+            const statusBox = document.getElementById('monitor-status');
+            statusBox.classList.remove('active');
+            statusBox.classList.add('inactive');
+            statusBox.innerHTML = 'Monitoring Stopped';
+            statusBox.style.backgroundColor = '';
             
             console.log('Monitoring stopped');
         }
@@ -528,21 +541,53 @@
                 // Convert to base64
                 const imageData = canvas.toDataURL('image/jpeg', 0.8);
                 
+                // Check audio capture state
+                console.log('📊 Audio capture status:', {
+                    audioChunksLength: audioChunks.length,
+                    mediaRecorderState: mediaRecorder ? mediaRecorder.state : 'N/A',
+                    lastAudioTimestamp: lastAudioTimestamp ? new Date(lastAudioTimestamp).toLocaleTimeString() : 'Never',
+                    missedAudioCycles: missedAudioCycles
+                });
+                
                 // Prepare audio data if available
                 let audioData = null;
                 if (audioChunks.length > 0) {
                     // Combine all audio chunks into a single blob
                     const audioBlob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
-                    console.log('Audio blob created:', audioBlob.size, 'bytes');
+                    console.log('✓ Audio blob created:', audioBlob.size, 'bytes');
                     
                     // Convert to base64
                     audioData = await blobToBase64(audioBlob);
                     
+                    // Update tracking
+                    lastAudioTimestamp = Date.now();
+                    missedAudioCycles = 0;
+                    
                     // Clear chunks after using them
                     audioChunks = [];
+                } else {
+                    // No audio chunks available
+                    missedAudioCycles++;
+                    console.warn(`⚠️  No audio chunks available (missed ${missedAudioCycles} cycles)`);
+                    
+                    // HARD ERROR after threshold
+                    if (missedAudioCycles > MAX_MISSED_AUDIO_CYCLES) {
+                        console.error(`🚨 CRITICAL: Audio capture has failed for ${missedAudioCycles} consecutive cycles!`);
+                        console.error('   MediaRecorder state:', mediaRecorder ? mediaRecorder.state : 'undefined');
+                        console.error('   Audio chunks:', audioChunks.length);
+                        
+                        // Show UI warning
+                        const statusBox = document.getElementById('monitor-status');
+                        statusBox.innerHTML = '⚠️ Audio Capture Failed';
+                        statusBox.style.backgroundColor = '#f59e0b';
+                        
+                        // DO NOT SEND REQUEST - audio capture is broken
+                        console.error('❌ REFUSING to send image-only request. Audio must be working.');
+                        return;
+                    }
                 }
                 
-                // Send to multimodal API
+                // Build request body
                 const requestBody = {
                     image: imageData,
                     session_id: sessionId,
@@ -553,9 +598,9 @@
                 if (audioData) {
                     requestBody.audio = audioData;
                     requestBody.sample_rate = 16000;
-                    console.log('Sending image + audio to /analyze_multimodal');
+                    console.log('📤 Sending image + audio to /analyze_multimodal');
                 } else {
-                    console.log('Sending image only to /analyze_multimodal');
+                    console.warn('📤 Sending image only to /analyze_multimodal (audio unavailable)');
                 }
                 
                 const response = await fetch(`${API_URL}/analyze_multimodal`, {
@@ -573,6 +618,39 @@
                 
                 const result = await response.json();
                 console.log('API response:', result);
+                
+                // Check for degraded multimodal state
+                if (result.system_state === 'DEGRADED') {
+                    console.error('🚨 SYSTEM DEGRADED: Both modalities are invalid!');
+                    const statusBox = document.getElementById('monitor-status');
+                    statusBox.innerHTML = '⚠️ DEGRADED: No valid data';
+                    statusBox.style.backgroundColor = '#ef4444';
+                    
+                    // Show on dashboard
+                    document.getElementById('current-score').textContent = '—';
+                    document.getElementById('stress-category').textContent = 'DEGRADED';
+                    return;
+                }
+                
+                // Check face detection status
+                if (result.face_detected === false) {
+                    noFaceFrameCount++;
+                    console.warn(`⚠️  No face detected (frame ${noFaceFrameCount}/${MAX_NO_FACE_FRAMES})`);
+                    
+                    if (noFaceFrameCount >= MAX_NO_FACE_FRAMES) {
+                        console.error('🚨 FACE LOST: No face detected for too many consecutive frames!');
+                        
+                        // Stop monitoring
+                        stopMonitoring();
+                        
+                        // Show error
+                        alert('Face lost! Please ensure your face is visible and well-lit, then restart monitoring.');
+                        return;
+                    }
+                } else {
+                    noFaceFrameCount = 0;  // Reset counter
+                }
+                
                 updateEmployeeDashboard(result);
                 
             } catch (error) {

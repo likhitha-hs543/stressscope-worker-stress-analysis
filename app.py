@@ -330,20 +330,36 @@ def analyze_multimodal():
         employee_id = data.get('employee_id', 'anonymous')
         session_id = data.get('session_id', str(uuid.uuid4()))
         
+        # Track what was received
+        image_received = 'image' in data and data['image']
+        audio_received = 'audio' in data and data['audio']
+        
+        logger.info(f"Multimodal request: image_received={image_received}, audio_received={audio_received}")
+        
         # Analyze face (if provided)
         facial_result = {'facial_stress_score': 0, 'face_detected': False}
-        if 'image' in data and data['image']:
+        if image_received:
             img = decode_image_from_base64(data['image'])
             if img is not None:
                 facial_result = facial_recognizer.analyze_frame(img)
+                logger.info(f"Face detection: face_detected={facial_result.get('face_detected', False)}")
+            else:
+                logger.warning("Image decode failed")
+        else:
+            logger.warning("No image data received")
         
         # Analyze speech (if provided)
         speech_result = {'speech_stress_score': 0}
-        if 'audio' in data and data['audio']:
+        if audio_received:
             audio_data = decode_audio_from_base64(data['audio'])
             if audio_data is not None:
                 sample_rate = data.get('sample_rate', 16000)
                 speech_result = speech_recognizer.analyze_audio(audio_data, sample_rate)
+                logger.info(f"Speech analysis: speech_available={speech_result.get('speech_available', False)}")
+            else:
+                logger.warning("Audio decode failed")
+        else:
+            logger.warning("No audio data received")
         
         # Multimodal fusion
         fusion_result = fusion_engine.analyze_multimodal(facial_result, speech_result)
@@ -367,6 +383,9 @@ def analyze_multimodal():
             'recommendation': recommendation,
             'alert': alert_result,
             'session_id': session_id,
+            # Add explicit modality status flags
+            'face_detected': facial_result.get('face_detected', False),
+            'audio_received': audio_received,
             # Add speech diagnostic fields from speech_result
             'speech_available': speech_result.get('speech_available', False),
             'speech_model_used': speech_result.get('speech_model_used', False),

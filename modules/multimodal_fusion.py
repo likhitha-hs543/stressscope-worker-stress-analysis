@@ -197,7 +197,8 @@ class MultimodalFusionEngine:
                 'stress_category': str,
                 'confidence': float,
                 'facial_emotion': str,
-                'speech_stress_level': str
+                'speech_stress_level': str,
+                'system_state': str  # 'NORMAL' or 'DEGRADED'
             }
         """
         # Extract scores
@@ -206,9 +207,16 @@ class MultimodalFusionEngine:
         
         # Check if both modalities available
         has_facial = facial_result.get('face_detected', False)
-        has_speech = 'error' not in speech_result
+        has_speech = speech_result.get('speech_available', False)
         
-        # Fuse scores
+        # Determine system state
+        if not has_facial and not has_speech:
+            system_state = 'DEGRADED'
+            logger.warning("🚨 SYSTEM DEGRADED: Both facial and speech modalities are invalid!")
+        else:
+            system_state = 'NORMAL'
+        
+        # Fuse scores (will be 0 if both invalid)
         fused_score = self.fuse_scores(facial_score, speech_score)
         
         # Apply smoothing
@@ -233,6 +241,7 @@ class MultimodalFusionEngine:
             'confidence': confidence,
             'has_facial': has_facial,
             'has_speech': has_speech,
+            'system_state': system_state,
             'facial_emotion': facial_result.get('dominant_emotion', 'Unknown'),
             'speech_stress_level': speech_result.get('stress_level', 'Unknown'),
             'timestamp': None  # Will be set by calling code

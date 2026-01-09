@@ -605,10 +605,12 @@
             
             if (analysisInterval) {
                 clearInterval(analysisInterval);
+                analysisInterval = null;
             }
             
             if (dashboardRefreshInterval) {
                 clearInterval(dashboardRefreshInterval);
+                dashboardRefreshInterval = null;
             }
             
             // Clear audio chunks

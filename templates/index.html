@@ -401,6 +401,7 @@
         let mediaRecorder = null;
         let audioChunks = [];
         let analysisInterval = null;
+        let dashboardRefreshInterval = null;
         let employeeChart = null;
         let distributionChart = null;
         let trendChart = null;
@@ -433,6 +434,56 @@
             
             if (type === 'admin') {
                 loadAdminData();
+            }
+        }
+        
+        // Load employee dashboard data
+        async function loadEmployeeDashboardData() {
+            try {
+                console.log('Loading employee dashboard data for:', EMPLOYEE_ID);
+                
+                const response = await fetch(`${API_URL}/dashboard/employee/${EMPLOYEE_ID}`);
+                
+                if (!response.ok) {
+                    console.error('Failed to fetch dashboard data:', response.status, response.statusText);
+                    return;
+                }
+                
+                const data = await response.json();
+                console.log('Dashboard data received:', data);
+                
+                // Check if we have today_stats
+                if (data.today_stats) {
+                    const todayStats = data.today_stats;
+                    
+                    // Update Today's Summary UI elements
+                    const avgElement = document.getElementById('today-avg');
+                    const maxElement = document.getElementById('today-max');
+                    const countElement = document.getElementById('today-count');
+                    
+                    // Update values or keep '--' if no data
+                    if (todayStats.total_readings > 0) {
+                        avgElement.textContent = todayStats.avg_stress.toFixed(1);
+                        maxElement.textContent = todayStats.max_stress.toFixed(1);
+                        countElement.textContent = todayStats.total_readings;
+                    } else {
+                        // No data yet, keep showing '--'
+                        avgElement.textContent = '--';
+                        maxElement.textContent = '--';
+                        countElement.textContent = '--';
+                    }
+                    
+                    console.log('Today\'s stats updated:', {
+                        avg: todayStats.avg_stress,
+                        max: todayStats.max_stress,
+                        count: todayStats.total_readings
+                    });
+                } else {
+                    console.log('No today_stats in response, keeping default values');
+                }
+                
+            } catch (error) {
+                console.error('Error loading employee dashboard data:', error);
             }
         }
         
@@ -527,6 +578,12 @@
                 // Start analysis loop
                 analysisInterval = setInterval(captureAndAnalyze, 5000); // Every 5 seconds
                 
+                // Load initial dashboard data
+                loadEmployeeDashboardData();
+                
+                // Set up periodic dashboard refresh (every 30 seconds)
+                dashboardRefreshInterval = setInterval(loadEmployeeDashboardData, 30000);
+                
                 console.log('Monitoring started');
             } catch (error) {
                 console.error('Error starting monitoring:', error);
@@ -548,6 +605,10 @@
             
             if (analysisInterval) {
                 clearInterval(analysisInterval);
+            }
+            
+            if (dashboardRefreshInterval) {
+                clearInterval(dashboardRefreshInterval);
             }
             
             // Clear audio chunks

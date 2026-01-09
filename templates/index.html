@@ -462,7 +462,7 @@
                     const countElement = document.getElementById('today-count');
                     
                     // Update values or keep '--' if no data
-                    if (todayStats.total_readings > 0) {
+                    if (todayStats.total_readings > 0 && todayStats.avg_stress != null && todayStats.max_stress != null) {
                         avgElement.textContent = todayStats.avg_stress.toFixed(1);
                         maxElement.textContent = todayStats.max_stress.toFixed(1);
                         countElement.textContent = todayStats.total_readings;
